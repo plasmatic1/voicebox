@@ -1,7 +1,7 @@
 import curses
 import pyttsx3
 import threading
-from queue import Queue
+from collections import deque
 
 def progress_bar(size, progress, sep=0.1, levels=['-', '*', chr(9608)]):
     progress_int = min(int(progress / sep), size * len(levels))
@@ -21,11 +21,12 @@ def main(stdscr):
     rate = engine.getProperty('rate')
     token_sep = ' '
 
-    queue = Queue()
+    queue = deque()
+    say_evt = threading.Event()
     cur = ''
 
     last_press = -1
-    chastity_cage = threading.Lock()
+    chastity_cage = threading.Lock() 
     def draw():
         chastity_cage.acquire()
 
@@ -37,10 +38,10 @@ def main(stdscr):
 
         stdscr.addstr(5, 0, f'Buffer: {repr(buf)}')
 
-        stdscr.addstr(6, 0, f'Words Being Spoken ({queue.qsize()} words remaining):')
-        stdscr.addstr(7, 4, repr(cur))
-        # for e, row in enumerate(queue, 8):
-        #     stdscr.addstr(row, 4, repr(e))
+        stdscr.addstr(6, 0, f'Words Being Spoken: {repr(cur)}')
+        stdscr.addstr(7, 0, f'Queue ({len(queue)} words remaining):')
+        for row, e in enumerate(queue, 8):
+            stdscr.addstr(row, 2, '- ' + repr(e))
         stdscr.refresh()
 
         chastity_cage.release()
@@ -51,17 +52,23 @@ def main(stdscr):
         nonlocal cur
 
         while True:
-            speech = queue.get(True)
-            while not queue.empty():
-                speech += ' ' + queue.get(True)
+            say_evt.wait(3) # wait timeout of 3 seconds in case something gets "stuck" (event flag is off, queue non-empty)
+            if not queue: continue 
+
+            # get next string of words to say
+            speech = queue.popleft()
+            while queue:
+                speech += ' ' + queue.popleft()
             cur = speech
             draw()
 
+            # say words and clear event
             if speech.strip():
                 engine.say(speech)
                 engine.runAndWait()
-            if queue.empty():
+            if not queue:
                 cur = ''
+                say_evt.clear()
             draw()
 
     talk_thread = threading.Thread(target=talk_loop)
@@ -90,7 +97,8 @@ def main(stdscr):
         else:
             c = chr(c)
             if c == token_sep:
-                queue.put(buf)
+                queue.append(buf)
+                say_evt.set()
                 buf = ''
             else:
                 buf += c
