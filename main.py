@@ -1,7 +1,18 @@
 import curses
-import pyttsx3
 import threading
 from collections import deque
+from gtts import gTTS, tts
+import playsound
+
+# im listening dw dwdwdwdwdw
+aliases = {
+        'im': 'i\'m',
+}
+
+def transform(s):
+    for k, v in aliases.items():
+        s = s.replaceall(k, v)
+    return s
 
 def progress_bar(size, progress, sep=0.1, levels=['-', '*', chr(9608)]):
     progress_int = min(int(progress / sep), size * len(levels))
@@ -13,13 +24,12 @@ def progress_bar(size, progress, sep=0.1, levels=['-', '*', chr(9608)]):
     return f'[{fill_char * fill_cnt}{prev_fill_char * (size - fill_cnt)}]'
 
 def main(stdscr):
-    engine = pyttsx3.init()
+    # engine = pyttsx3.init()
 
     # UI and state
     buf = ''
-    volume = engine.getProperty('volume')
-    rate = engine.getProperty('rate')
     token_sep = ' '
+    retries = -1
 
     queue = deque()
     say_evt = threading.Event()
@@ -31,15 +41,14 @@ def main(stdscr):
         chastity_cage.acquire()
 
         stdscr.clear()
-        stdscr.addstr(0, 0, f'Volume: {volume:.1f} {progress_bar(10, volume)}')
-        stdscr.addstr(1, 0, f'Rate: {rate} {progress_bar(10, rate, sep=20)}')
-        stdscr.addstr(2, 0, f'Token Separator: {repr(token_sep)}')
-        stdscr.addstr(3, 0, f'Last Press: {last_press}')
+        stdscr.addstr(0, 0, f'Token Separator: {repr(token_sep)}')
+        stdscr.addstr(1, 0, f'Last Press: {last_press}')
 
-        stdscr.addstr(5, 0, f'Buffer: {repr(buf)}')
-
-        stdscr.addstr(6, 0, f'Words Being Spoken: {repr(cur)}')
-        stdscr.addstr(7, 0, f'Queue ({len(queue)} words remaining):')
+        stdscr.addstr(3, 0, f'Buffer: {repr(buf)}')
+        stdscr.addstr(4, 0, f'Words Being Spoken: {repr(cur)}')
+        stdscr.addstr(5, 0, f'Queue ({len(queue)} words remaining):')
+        if retries != -1:
+            stdscr.addstr(6, 0, f'!! Attempted Retry, {retries} retries remaining !!')
         for row, e in enumerate(queue, 8):
             stdscr.addstr(row, 2, '- ' + repr(e))
         stdscr.refresh()
@@ -50,6 +59,7 @@ def main(stdscr):
     def talk_loop():
         nonlocal queue
         nonlocal cur
+        nonlocal retries
 
         while True:
             say_evt.wait(3) # wait timeout of 3 seconds in case something gets "stuck" (event flag is off, queue non-empty)
@@ -64,8 +74,26 @@ def main(stdscr):
 
             # say words and clear event
             if speech.strip():
-                engine.say(speech)
-                engine.runAndWait()
+                # engine.say(speech)
+                # engine.runAndWait()
+                # gtts.tts.gTTSError
+                while True:
+                    try:
+                        g = gTTS(speech)
+                        g.save('last.mp3')
+                        playsound.playsound('last.mp3')
+                        break
+                    except tts.gTTSError:
+                        if retries == 0:
+                            break
+                        elif retries == -1:
+                            retries = 3
+
+                        retries -= 1
+                    draw()
+
+                retries = -1
+
             if not queue:
                 cur = ''
                 say_evt.clear()
@@ -78,19 +106,7 @@ def main(stdscr):
     while True:
         c = stdscr.getch()
         last_press = c
-        if c == curses.KEY_UP:
-            volume += 0.1
-            engine.setProperty('volume', volume)
-        elif c == curses.KEY_DOWN:
-            volume -= 0.1
-            engine.setProperty('volume', volume)
-        elif c == curses.KEY_RIGHT:
-            rate += 20
-            engine.setProperty('rate', rate)
-        elif c == curses.KEY_LEFT:
-            rate -= 20
-            engine.setProperty('rate', rate)
-        elif c == curses.KEY_BACKSPACE:
+        if c == curses.KEY_BACKSPACE:
             buf = buf[:-1]
         elif c == 1:
             token_sep = ' ' if token_sep == '\n' else '\n'
